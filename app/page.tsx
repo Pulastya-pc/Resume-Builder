@@ -16,6 +16,7 @@ import ResumeEditor from "./components/resume/ResumeEditor";
 import { useResume } from "./components/resume/hooks/useResume";
 import ResumePreviewPanel from "./components/resume/ResumePreviewPanel";
 import { authClient } from "@/lib/auth-client";
+import Link from "next/link";
 const emptyResume: Resume = {
   name: "",
   email: "",
@@ -631,6 +632,12 @@ const downloadPDF = async () => {
             </div>
           </div>
         </div>
+        {!session?.user && (
+          <nav aria-label="Account" className="mt-5 flex flex-wrap items-center gap-3">
+            <Link href="/login" className="rounded-lg border border-neutral-700 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-800">Sign in</Link>
+            <Link href="/signup" className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700">Create account</Link>
+          </nav>
+        )}
         <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 text-white">
           {session?.user ? (
             <div className="flex flex-wrap items-center justify-between gap-3">
