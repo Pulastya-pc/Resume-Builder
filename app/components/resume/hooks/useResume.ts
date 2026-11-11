@@ -56,6 +56,8 @@ export function useResume() {
 
     if (savedResume) {
       try {
+        // Restore browser storage after mount to avoid reading localStorage during server rendering.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setResume(JSON.parse(savedResume));
       } catch {
         localStorage.removeItem("resume-data");

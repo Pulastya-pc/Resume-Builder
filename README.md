@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Resume Builder
 
-## Getting Started
+A Next.js resume editor with three templates, field validation, browser saving, and PDF export. Email/password accounts and private account resume storage are provided by Better Auth and Prisma with MySQL.
 
-First, run the development server:
+## Local setup
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Install Node.js 20.19+ and MySQL Server. In MySQL Workbench, confirm that the `resume_builder` schema exists.
+2. Create a `.env` file in this folder and add `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL`.
+3. Update `DATABASE_URL` with the MySQL username and password for your local server. If the password contains reserved URL characters (`@`, `:`, `/`, `#`, `%`), URL-encode those characters.
+4. Generate a private auth secret. In PowerShell, run:
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+   ```powershell
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+   ```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+   Paste the result into `BETTER_AUTH_SECRET` in `.env`. Keep this value private and do not commit `.env`.
+5. Leave `BETTER_AUTH_URL=http://localhost:3000` for local development.
+6. In this folder, run:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+   ```powershell
+   npm ci
+   npx prisma generate
+   npx prisma migrate dev --name init
+   npm run dev
+   ```
 
-## Learn More
+7. Open <http://localhost:3000>, create an account, fill out a resume, and click **Save Resume**. Anonymous resumes continue to save in the browser. Signed-in resumes also save to that account's MySQL row.
 
-To learn more about Next.js, take a look at the following resources:
+Existing `resume-data` browser data stays on the device and can be saved into the first account you sign into. After a resume is linked to an account, separate accounts use separate browser caches as well as separate database rows.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## College submission scope
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The unfinished Python/AI backend is not part of this submission. It remains excluded by `.gitignore`.

@@ -15,6 +15,7 @@ import type {
 import ResumeEditor from "./components/resume/ResumeEditor";
 import { useResume } from "./components/resume/hooks/useResume";
 import ResumePreviewPanel from "./components/resume/ResumePreviewPanel";
+import { authClient } from "@/lib/auth-client";
 const emptyResume: Resume = {
   name: "",
   email: "",
@@ -55,23 +56,15 @@ const emptyResume: Resume = {
   ],
 };
 
-const inputClass =
-  "w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-red-600 focus:ring-2 focus:ring-red-100";
-
-const textareaClass =
-  "w-full resize-none rounded-xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-red-600 focus:ring-2 focus:ring-red-100";
-
-const labelClass =
-  "mb-2 block text-sm font-semibold text-neutral-800";
-
-const addButtonClass =
-  "inline-flex items-center gap-2 rounded-xl border border-black bg-black px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 hover:border-red-700";
-
-const removeButtonClass =
-  "inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-600 hover:text-white";
-
 export default function Home() {
   const { resume, setResume, updateResume } = useResume();
+  const { data: session, isPending: sessionPending } = authClient.useSession();
+  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [authName, setAuthName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
   const [selectedTemplate, setSelectedTemplate] =
   useState<ResumeTemplate>("classic");
 
@@ -82,6 +75,60 @@ export default function Home() {
   const [saveMessage, setSaveMessage] = useState("");
 
   const previewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!session?.user.id) return;
+    let cancelled = false;
+    const userId = session.user.id;
+    const localOwner = localStorage.getItem("resume-data-owner");
+    const accountKey = `resume-data:${userId}`;
+    const accountCopy = localStorage.getItem(accountKey);
+    if (localOwner && localOwner !== userId) setResume(emptyResume);
+    fetch("/api/resume")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Cloud storage is unavailable.");
+        return response.json();
+      })
+      .then((result: { resume: Resume | null }) => {
+        if (cancelled) return;
+        if (result.resume) {
+          setResume(result.resume);
+          localStorage.setItem(accountKey, JSON.stringify(result.resume));
+          localStorage.setItem("resume-data-owner", userId);
+        } else if (accountCopy) {
+          const parsed: unknown = JSON.parse(accountCopy);
+          setResume(parsed as Resume);
+        } else if (!localOwner) {
+          // Keep the existing anonymous browser resume available to migrate to the first account.
+        } else {
+          setResume(emptyResume);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSaveMessage("Signed in, but cloud storage is not ready yet.");
+      });
+    return () => { cancelled = true; };
+  }, [session?.user.id, setResume]);
+
+  const submitAuth = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthMessage("");
+    try {
+      const result = authMode === "sign-up"
+        ? await authClient.signUp.email({ name: authName.trim(), email: authEmail.trim(), password: authPassword })
+        : await authClient.signIn.email({ email: authEmail.trim(), password: authPassword });
+      if (result.error) setAuthMessage(result.error.message ?? "Could not sign in.");
+      else {
+        setAuthPassword("");
+        setAuthMessage(authMode === "sign-up" ? "Account created." : "Signed in.");
+      }
+    } catch {
+      setAuthMessage("Could not connect to authentication. Check your database setup.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
 
 
 
@@ -342,7 +389,7 @@ export default function Home() {
   // SAVE / RESET
   // ---------------------------------------
 
-  const saveResume = () => {
+  const saveResume = async () => {
     if (resume.email && !isValidEmail(resume.email)) {
       setEmailError("Please enter a valid email address.");
       return;
@@ -358,9 +405,29 @@ export default function Home() {
       return;
     }
 
-    localStorage.setItem("resume-data", JSON.stringify(resume));
+    if (session?.user.id) {
+      localStorage.setItem(`resume-data:${session.user.id}`, JSON.stringify(resume));
+      localStorage.setItem("resume-data-owner", session.user.id);
+    } else {
+      localStorage.setItem("resume-data", JSON.stringify(resume));
+    }
 
-    setSaveMessage("Resume saved successfully.");
+    if (session?.user.id) {
+      try {
+        const response = await fetch("/api/resume", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(resume),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "Cloud save failed.");
+        setSaveMessage("Resume saved on this device and to your account.");
+      } catch {
+        setSaveMessage("Saved on this device. Cloud save failed; check your database setup.");
+      }
+    } else {
+      setSaveMessage("Resume saved on this device. Sign in to save it to your account.");
+    }
 
     setTimeout(() => {
       setSaveMessage("");
@@ -375,6 +442,14 @@ export default function Home() {
     if (!confirmed) return;
 
     localStorage.removeItem("resume-data");
+    if (session?.user.id) {
+      localStorage.removeItem(`resume-data:${session.user.id}`);
+      fetch("/api/resume", { method: "DELETE" })
+        .then((response) => {
+          if (!response.ok) setSaveMessage("This device was reset, but the cloud copy could not be removed.");
+        })
+        .catch(() => setSaveMessage("This device was reset, but the cloud copy could not be removed."));
+    }
 
     setResume(emptyResume);
 
@@ -555,6 +630,31 @@ const downloadPDF = async () => {
               />
             </div>
           </div>
+        </div>
+        <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 text-white">
+          {session?.user ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-neutral-300">Signed in as <span className="font-semibold text-white">{session.user.email}</span>. Your cloud resume is private to your account.</p>
+              <button type="button" onClick={async () => { await authClient.signOut(); setResume(emptyResume); }} className="rounded-lg border border-neutral-700 px-4 py-2 text-sm font-semibold hover:bg-neutral-800">Sign out</button>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-[1fr_1.2fr] md:items-center">
+              <div>
+                <h2 className="font-bold">Save your resume to your account</h2>
+                <p className="mt-1 text-sm text-neutral-400">Create an account or sign in to access your resume across devices.</p>
+              </div>
+              <form onSubmit={submitAuth} className="grid gap-2 sm:grid-cols-2">
+                {authMode === "sign-up" && <input required minLength={2} maxLength={80} autoComplete="name" value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder="Your name" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-white placeholder:text-neutral-500" />}
+                <input required type="email" autoComplete="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="Email" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-white placeholder:text-neutral-500" />
+                <input required type="password" minLength={8} autoComplete={authMode === "sign-up" ? "new-password" : "current-password"} value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="Password (8+ characters)" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-white placeholder:text-neutral-500" />
+                <div className="flex gap-2">
+                  <button disabled={authBusy || sessionPending} type="submit" className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-60">{authBusy ? "Please wait…" : authMode === "sign-up" ? "Create account" : "Sign in"}</button>
+                  <button type="button" onClick={() => { setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in"); setAuthMessage(""); }} className="rounded-lg border border-neutral-700 px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-800">{authMode === "sign-in" ? "Create account" : "I have an account"}</button>
+                </div>
+                {authMessage && <p aria-live="polite" className="text-sm text-neutral-300 sm:col-span-2">{authMessage}</p>}
+              </form>
+            </div>
+          )}
         </div>
       </header>
 
